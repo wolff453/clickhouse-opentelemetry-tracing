@@ -1,0 +1,73 @@
+version: '3.9'
+
+networks:
+  otel-example:
+
+volumes:
+  otel-flask-app-cache:
+  otel-db:
+  clickhouse-data:
+  grafana-storage:
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
+      jaeger-all-in-one:
+        condition: service_started
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      - DD_SITE=datadoghq.com
+    env_file:
+      - ./.env
+    networks:
+      otel-example:
+
+  jaeger-all-in-one:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    ports:
+      - 16686:16686
+      - 14250:14250
+    networks:
+      otel-example:
+
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    networks:
+      otel-example:
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=admin
+    healthcheck:
+      test: wget --spider -q http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 2s
+      retries: 10
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - clickhouse-server
+    networks:
+      otel-example:
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
